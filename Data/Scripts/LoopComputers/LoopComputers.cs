@@ -224,7 +224,7 @@ namespace Digi.LoopComputers
                     SaveToName();
                 }
                 
-                if(Math.Abs(delayTime) < float.Epsilon)
+                if(delayTime < 0.016f)
                     return;
                 
                 var block = Entity as IMyFunctionalBlock;
