@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -27,28 +28,7 @@ namespace Digi.LoopComputers
             Log.Init();
             Log.Info("Initialized.");
             
-            var tc = MyAPIGateway.TerminalControls;
-            
-            tc.AddControl<Ingame.IMyProgrammableBlock>(tc.CreateControl<IMyTerminalControlSeparator, Ingame.IMyProgrammableBlock>(string.Empty));
-            
-            var c = tc.CreateControl<IMyTerminalControlSlider, Ingame.IMyProgrammableBlock>("Digi.LoopComputers.RepeatTime");
-            c.Title = MyStringId.GetOrCompute("Self run:");
-            c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
-            c.SupportsMultipleBlocks = true;
-            c.SetLogLimits(0.015f, 600f);
-            c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
-            c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
-            c.Writer = delegate(IMyTerminalBlock b, StringBuilder s)
-            {
-                float v = b.GameLogic.GetAs<LoopPB>().DelayTime;
-                
-                if(v < 0.016f)
-                    s.Append("Off");
-                else
-                    s.AppendFormat("{0:0.000}s / {1}ticks", v, Math.Round(v * 60));
-            };
-            
-            tc.AddControl<Ingame.IMyProgrammableBlock>(c);
+            MyAPIGateway.TerminalControls.CustomControlGetter += CustomControlGetter;
         }
         
         protected override void UnloadData()
@@ -67,6 +47,35 @@ namespace Digi.LoopComputers
             }
             
             Log.Close();
+        }
+        
+        public static void CustomControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls)
+        {
+            if(!(block is Ingame.IMyProgrammableBlock))
+                return;
+            
+            var tc = MyAPIGateway.TerminalControls;
+            
+            controls.AddOrInsert(tc.CreateControl<IMyTerminalControlSeparator, Ingame.IMyProgrammableBlock>(string.Empty), 9);
+            
+            var c = tc.CreateControl<IMyTerminalControlSlider, Ingame.IMyProgrammableBlock>("Digi.LoopComputers.RepeatTime");
+            c.Title = MyStringId.GetOrCompute("Self run");
+            c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
+            c.SupportsMultipleBlocks = true;
+            c.SetLogLimits(0.015f, 600f);
+            c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
+            c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
+            c.Writer = delegate(IMyTerminalBlock b, StringBuilder s)
+            {
+                float v = b.GameLogic.GetAs<LoopPB>().DelayTime;
+                
+                if(v < 0.016f)
+                    s.Append("Off");
+                else
+                    s.AppendFormat("{0:0.000}s / {1}ticks", v, Math.Round(v * 60));
+            };
+            
+            controls.AddOrInsert(c, 10);
         }
         
         public override void UpdateBeforeSimulation()
@@ -220,9 +229,7 @@ namespace Digi.LoopComputers
                     return;
                 
                 if(propertiesChangedDelay > 0 && --propertiesChangedDelay == 0)
-                {
                     SaveToName();
-                }
                 
                 if(delayTime < 0.016f)
                     return;
