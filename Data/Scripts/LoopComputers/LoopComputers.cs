@@ -21,6 +21,10 @@ namespace Digi.LoopComputers
     {
         public static bool init = false;
         
+        private static IMyTerminalControl separator = null;
+        
+        public const string SLIDER_ID = "LoopComputers.RepeatTime";
+        
         private void Init()
         {
             init = true;
@@ -38,6 +42,9 @@ namespace Digi.LoopComputers
                 if(init)
                 {
                     init = false;
+                    
+                    MyAPIGateway.TerminalControls.CustomControlGetter -= CustomControlGetter;
+                    
                     Log.Info("Mod unloaded.");
                 }
             }
@@ -49,32 +56,22 @@ namespace Digi.LoopComputers
             Log.Close();
         }
         
-        public static void CustomControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls)
+        public void CustomControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls)
         {
             if(!(block is Ingame.IMyProgrammableBlock))
                 return;
             
-            var tc = MyAPIGateway.TerminalControls;
+            var index = controls.FindIndex((m) => m.Id == SLIDER_ID);
             
-            controls.AddOrInsert(tc.CreateControl<IMyTerminalControlSeparator, Ingame.IMyProgrammableBlock>(string.Empty), 9);
+            if(index == -1)
+                return;
             
-            var c = tc.CreateControl<IMyTerminalControlSlider, Ingame.IMyProgrammableBlock>("Digi.LoopComputers.RepeatTime");
-            c.Title = MyStringId.GetOrCompute("Self run");
-            c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
-            c.SupportsMultipleBlocks = true;
-            c.SetLogLimits(0.015f, 600f);
-            c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
-            c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
-            c.Writer = delegate(IMyTerminalBlock b, StringBuilder s)
-            {
-                float v = b.GameLogic.GetAs<LoopPB>().DelayTime;
-                
-                if(v < 0.016f)
-                    s.Append("Off");
-                else
-                    s.AppendFormat("{0:0.000}s / {1}ticks", v, Math.Round(v * 60));
-            };
+            if(separator == null)
+                separator = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, Ingame.IMyProgrammableBlock>(string.Empty);
             
+            var c = controls[index];
+            controls.RemoveAt(index);
+            controls.AddOrInsert(separator, 9);
             controls.AddOrInsert(c, 10);
         }
         
@@ -105,6 +102,8 @@ namespace Digi.LoopComputers
         private int tick = 0;
         private byte propertiesChangedDelay = 0;
         
+        private static bool initTerminalUI = false;
+        
         private static readonly StringBuilder str = new StringBuilder();
         
         private const string DATA_TAG_START = "{LoopComputers:";
@@ -129,6 +128,35 @@ namespace Digi.LoopComputers
             block.CustomNameChanged += NameChanged;
             ReadLegacyName(block);
             NameChanged(block);
+            
+            if(!initTerminalUI)
+            {
+                initTerminalUI = true;
+                
+                var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, Ingame.IMyProgrammableBlock>(LoopComputersMod.SLIDER_ID);
+                c.Title = MyStringId.GetOrCompute("Self run");
+                c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
+                c.SupportsMultipleBlocks = true;
+                c.SetLogLimits(0.015f, 600f);
+                c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
+                c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
+                c.Writer = delegate(IMyTerminalBlock b, StringBuilder s)
+                {
+                    float v = b.GameLogic.GetAs<LoopPB>().DelayTime;
+                    
+                    if(v < 0.016f)
+                    {
+                        s.Append("Off");
+                    }
+                    else
+                    {
+                        var ticks = (int)Math.Round(v * 60);
+                        s.AppendFormat("{0:0.000}s / {1}tick{2}", v, ticks, (ticks == 1 ? "" : "s"));
+                    }
+                };
+                
+                MyAPIGateway.TerminalControls.AddControl<Ingame.IMyProgrammableBlock>(c);
+            }
         }
         
         public override void Close()
@@ -225,18 +253,18 @@ namespace Digi.LoopComputers
                     return;
                 }
                 
-                if(!MyAPIGateway.Multiplayer.IsServer)
-                    return;
-                
                 if(propertiesChangedDelay > 0 && --propertiesChangedDelay == 0)
                     SaveToName();
+                
+                if(!MyAPIGateway.Multiplayer.IsServer)
+                    return;
                 
                 if(delayTime < 0.016f)
                     return;
                 
                 var block = Entity as IMyFunctionalBlock;
                 
-                if(block.Enabled && block.IsWorking && block.IsFunctional && ++tick >= (delayTime * 60))
+                if(block.Enabled && block.IsFunctional && block.IsWorking && ++tick >= (delayTime * 60))
                 {
                     tick = 0;
                     block.GetActionWithName("Run").Apply(block);
