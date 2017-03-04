@@ -7,6 +7,7 @@ using Sandbox.Common.ObjectBuilders;
 using Sandbox.ModAPI;
 using Sandbox.ModAPI.Interfaces.Terminal;
 using VRage.Game.Components;
+using VRage.Game.ModAPI;
 using VRage.ModAPI;
 using VRage.ObjectBuilders;
 using VRage.Utils;
@@ -27,7 +28,7 @@ namespace Digi.LoopComputers
         private static IMyTerminalControl separator = null;
 
         public const string SLIDER_ID = "LoopComputers.RepeatTime";
-        public const string RUN_ID = "TerminalRun";
+        public const string AFTER_CONTROL_ID = "Recompile";
 
         private void Init()
         {
@@ -57,7 +58,7 @@ namespace Digi.LoopComputers
             Log.Close();
         }
 
-        // move this mods' terminal controls right after the Run button
+        // move this mods' terminal controls right after the control specified in AFTER_CONTROL_ID
         public void CustomControlGetter(IMyTerminalBlock block, List<IMyTerminalControl> controls)
         {
             if(block is IMyProgrammableBlock)
@@ -70,7 +71,7 @@ namespace Digi.LoopComputers
                 if(separator == null)
                     separator = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSeparator, IMyProgrammableBlock>(string.Empty);
 
-                var runIndex = controls.FindIndex((m) => m.Id == RUN_ID);
+                var runIndex = controls.FindIndex((m) => m.Id == AFTER_CONTROL_ID);
                 var c = controls[index];
                 controls.RemoveAt(index);
                 controls.AddOrInsert(separator, runIndex + 1);
@@ -97,7 +98,7 @@ namespace Digi.LoopComputers
         }
     }
 
-    [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock))]
+    [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), useEntityUpdate: true)]
     public class LoopPB : MyGameLogicComponent
     {
         private bool first = true;
@@ -120,11 +121,6 @@ namespace Digi.LoopComputers
             Entity.NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
         }
 
-        public override MyObjectBuilder_EntityBase GetObjectBuilder(bool copy = false)
-        {
-            return Entity.GetObjectBuilder(copy);
-        }
-
         private void FirstUpdate()
         {
             var block = Entity as IMyTerminalBlock;
@@ -137,10 +133,11 @@ namespace Digi.LoopComputers
                 initTerminalUI = true;
 
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(LoopComputersMod.SLIDER_ID);
-                c.Title = MyStringId.GetOrCompute("Self run");
+                c.Title = MyStringId.GetOrCompute("Auto-run");
                 c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
                 c.SupportsMultipleBlocks = true;
                 c.SetLogLimits(0.015f, 600f);
+                c.Enabled = (b) => (!MyAPIGateway.Session.SessionSettings.EnableScripterRole || MyAPIGateway.Session.PromoteLevel >= MyPromoteLevel.Scripter);
                 c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
                 c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
                 c.Writer = delegate (IMyTerminalBlock b, StringBuilder s)
@@ -221,7 +218,7 @@ namespace Digi.LoopComputers
                 str.Append(DATA_TAG_END);
             }
 
-            block.SetCustomName(str.ToString());
+            block.CustomName = str.ToString();
         }
 
         private string GetNameNoData()
@@ -265,12 +262,12 @@ namespace Digi.LoopComputers
                 if(delayTime < 0.016f)
                     return;
 
-                var block = Entity as IMyFunctionalBlock;
+                var pb = (IMyProgrammableBlock)Entity;
 
-                if(block.Enabled && block.IsFunctional && block.IsWorking && ++tick >= (delayTime * 60))
+                if(pb.Enabled && pb.IsFunctional && pb.IsWorking && ++tick >= (delayTime * 60))
                 {
                     tick = 0;
-                    block.GetActionWithName("Run").Apply(block);
+                    pb.TryRun(pb.TerminalRunArgument);
                 }
             }
             catch(Exception e)
