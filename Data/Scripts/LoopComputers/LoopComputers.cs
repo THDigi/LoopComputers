@@ -267,7 +267,7 @@ namespace Digi.LoopComputers
                 if(pb.Enabled && pb.IsFunctional && pb.IsWorking && ++tick >= (delayTime * 60))
                 {
                     tick = 0;
-                    pb.TryRun(pb.TerminalRunArgument);
+                    pb.Run();
                 }
             }
             catch(Exception e)
