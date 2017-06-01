@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using Sandbox.Common.ObjectBuilders;
@@ -20,12 +19,17 @@ namespace Digi.LoopComputers
     {
         public override void LoadData()
         {
+            instance = this;
             Log.SetUp("Loop Computers", 400037065, "LoopComputers");
         }
 
-        public static bool init = false;
+        public static LoopComputersMod instance = null;
 
-        private static IMyTerminalControl separator = null;
+        public bool init = false;
+        public bool initTerminalUI = false;
+        public readonly StringBuilder str = new StringBuilder();
+
+        private IMyTerminalControl separator = null;
 
         public const string SLIDER_ID = "LoopComputers.RepeatTime";
         public const string AFTER_CONTROL_ID = "Recompile";
@@ -37,6 +41,8 @@ namespace Digi.LoopComputers
             Log.Init();
 
             MyAPIGateway.TerminalControls.CustomControlGetter += CustomControlGetter;
+
+            MyAPIGateway.Utilities.InvokeOnGameThread(() => SetUpdateOrder(MyUpdateOrder.NoUpdate));
         }
 
         protected override void UnloadData()
@@ -55,6 +61,7 @@ namespace Digi.LoopComputers
                 Log.Error(e);
             }
 
+            instance = null;
             Log.Close();
         }
 
@@ -98,17 +105,13 @@ namespace Digi.LoopComputers
         }
     }
 
-    [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), useEntityUpdate: true)]
+    [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), useEntityUpdate: false)]
     public class LoopPB : MyGameLogicComponent
     {
         private bool first = true;
         private float delayTime = 0;
         private int tick = 0;
         private byte propertiesChangedDelay = 0;
-
-        private static bool initTerminalUI = false;
-
-        private static readonly StringBuilder str = new StringBuilder();
 
         private const string DATA_TAG_START = "{LoopComputers:";
         private const char DATA_TAG_END = '}';
@@ -118,19 +121,19 @@ namespace Digi.LoopComputers
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
-            Entity.NeedsUpdate |= MyEntityUpdateEnum.EACH_FRAME;
+            NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
         }
 
         private void FirstUpdate()
         {
-            var block = Entity as IMyTerminalBlock;
+            var block = (IMyTerminalBlock)Entity;
             block.CustomNameChanged += NameChanged;
             ReadLegacyName(block);
             NameChanged(block);
 
-            if(!initTerminalUI)
+            if(!LoopComputersMod.instance.initTerminalUI)
             {
-                initTerminalUI = true;
+                LoopComputersMod.instance.initTerminalUI = true;
 
                 var c = MyAPIGateway.TerminalControls.CreateControl<IMyTerminalControlSlider, IMyProgrammableBlock>(LoopComputersMod.SLIDER_ID);
                 c.Title = MyStringId.GetOrCompute("Auto-run");
@@ -161,7 +164,7 @@ namespace Digi.LoopComputers
 
         public override void Close()
         {
-            var block = Entity as IMyTerminalBlock;
+            var block = (IMyTerminalBlock)Entity;
             block.CustomNameChanged -= NameChanged;
         }
 
@@ -206,7 +209,8 @@ namespace Digi.LoopComputers
 
         private void SaveToName(string forceName = null)
         {
-            var block = Entity as IMyTerminalBlock;
+            var block = (IMyTerminalBlock)Entity;
+            var str = LoopComputersMod.instance.str;
             str.Clear();
             str.Append(forceName ?? GetNameNoData().Trim());
 
@@ -219,6 +223,7 @@ namespace Digi.LoopComputers
             }
 
             block.CustomName = str.ToString();
+            str.Clear();
         }
 
         private string GetNameNoData()
@@ -243,9 +248,14 @@ namespace Digi.LoopComputers
         {
             try
             {
+                var pb = (IMyProgrammableBlock)Entity;
+
+                if(pb.CubeGrid.Physics == null)
+                    return;
+
                 if(first)
                 {
-                    if(!LoopComputersMod.init)
+                    if(LoopComputersMod.instance == null || !LoopComputersMod.instance.init)
                         return;
 
                     first = false;
@@ -261,8 +271,6 @@ namespace Digi.LoopComputers
 
                 if(delayTime < 0.016f)
                     return;
-
-                var pb = (IMyProgrammableBlock)Entity;
 
                 if(pb.Enabled && pb.IsFunctional && pb.IsWorking && ++tick >= (delayTime * 60))
                 {
