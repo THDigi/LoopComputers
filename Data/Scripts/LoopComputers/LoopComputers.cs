@@ -28,6 +28,7 @@ namespace Digi.LoopComputers
         public bool init = false;
         public bool initTerminalUI = false;
         public readonly StringBuilder str = new StringBuilder();
+        public readonly Dictionary<long, LoopPB> PBs = new Dictionary<long, LoopPB>();
 
         private IMyTerminalControl separator = null;
 
@@ -42,7 +43,8 @@ namespace Digi.LoopComputers
 
             MyAPIGateway.TerminalControls.CustomControlGetter += CustomControlGetter;
 
-            MyAPIGateway.Utilities.InvokeOnGameThread(() => SetUpdateOrder(MyUpdateOrder.NoUpdate));
+            // HACK disabled to allow PBs to update using this session component
+            //MyAPIGateway.Utilities.InvokeOnGameThread(() => SetUpdateOrder(MyUpdateOrder.NoUpdate));
         }
 
         protected override void UnloadData()
@@ -97,6 +99,12 @@ namespace Digi.LoopComputers
 
                     Init();
                 }
+
+                // HACK update PBs here...
+                foreach(var pb in PBs)
+                {
+                    pb.Value.UpdateBeforeSimulation();
+                }
             }
             catch(Exception e)
             {
@@ -121,7 +129,11 @@ namespace Digi.LoopComputers
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
-            NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
+            // using InvokeOnGameThread() since Init() can be async
+            MyAPIGateway.Utilities.InvokeOnGameThread(() => LoopComputersMod.instance.PBs.Add(Entity.EntityId, this));
+
+            // HACK disabled since gamelogic update doesn't work on PBs right now, workaround added above.
+            //NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
         }
 
         private void FirstUpdate()
@@ -139,8 +151,27 @@ namespace Digi.LoopComputers
                 c.Title = MyStringId.GetOrCompute("Auto-run");
                 c.Tooltip = MyStringId.GetOrCompute("The block runs itself at the specified interval.\nValues smaller than 0.016s (one tick) are considered off.");
                 c.SupportsMultipleBlocks = true;
-                c.SetLogLimits(0.015f, 600f);
+                c.SetLogLimits(0.015f, 600f); // this min value can't be 0 or it screws up the math...
                 c.Enabled = (b) => (!MyAPIGateway.Session.SessionSettings.EnableScripterRole || MyAPIGateway.Session.PromoteLevel >= MyPromoteLevel.Scripter);
+
+                // HACK had to rewrite these since gamelogic doesn't return the class either.
+                c.Setter = (b, v) => LoopComputersMod.instance.PBs[b.EntityId].DelayTime = (v < 0.016f ? 0 : v);
+                c.Getter = (b) => LoopComputersMod.instance.PBs[b.EntityId].DelayTime;
+                c.Writer = delegate (IMyTerminalBlock b, StringBuilder s)
+                {
+                    float v = LoopComputersMod.instance.PBs[b.EntityId].DelayTime;
+
+                    if(v < 0.016f)
+                    {
+                        s.Append("Off");
+                    }
+                    else
+                    {
+                        var ticks = (int)Math.Round(v * 60);
+                        s.AppendFormat("{0:0.000}s / {1}tick{2}", v, ticks, (ticks == 1 ? "" : "s"));
+                    }
+                };
+#if false
                 c.Setter = (b, v) => b.GameLogic.GetAs<LoopPB>().DelayTime = (v < 0.016f ? 0 : v);
                 c.Getter = (b) => (b.GameLogic.GetAs<LoopPB>().DelayTime);
                 c.Writer = delegate (IMyTerminalBlock b, StringBuilder s)
@@ -157,6 +188,7 @@ namespace Digi.LoopComputers
                         s.AppendFormat("{0:0.000}s / {1}tick{2}", v, ticks, (ticks == 1 ? "" : "s"));
                     }
                 };
+#endif
 
                 MyAPIGateway.TerminalControls.AddControl<IMyProgrammableBlock>(c);
             }
@@ -164,8 +196,17 @@ namespace Digi.LoopComputers
 
         public override void Close()
         {
-            var block = (IMyTerminalBlock)Entity;
-            block.CustomNameChanged -= NameChanged;
+            try
+            {
+                LoopComputersMod.instance?.PBs.Remove(Entity.EntityId);
+
+                var block = (IMyTerminalBlock)Entity;
+                block.CustomNameChanged -= NameChanged;
+            }
+            catch(Exception e)
+            {
+                Log.Error(e);
+            }
         }
 
         public float DelayTime
