@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -101,9 +102,9 @@ namespace Digi.LoopComputers
                 }
 
                 // HACK update PBs here...
-                foreach(var pb in PBs)
+                foreach(var gamelogic in PBs.Values)
                 {
-                    pb.Value.UpdateBeforeSimulation();
+                    gamelogic.UpdateBeforeSimulation();
                 }
             }
             catch(Exception e)
@@ -116,6 +117,7 @@ namespace Digi.LoopComputers
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), useEntityUpdate: false)]
     public class LoopPB : MyGameLogicComponent
     {
+        private IMyProgrammableBlock pb;
         private bool first = true;
         private float delayTime = 0;
         private int tick = 0;
@@ -129,8 +131,10 @@ namespace Digi.LoopComputers
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
+            pb = (IMyProgrammableBlock)Entity; // HACK needed to stire Entity because it will be null after Init() if this is the only component on this block.
+
             // using InvokeOnGameThread() since Init() can be async
-            MyAPIGateway.Utilities.InvokeOnGameThread(() => LoopComputersMod.instance.PBs.Add(Entity.EntityId, this));
+            MyAPIGateway.Utilities.InvokeOnGameThread(() => LoopComputersMod.instance.PBs.Add(pb.EntityId, this));
 
             // HACK disabled since gamelogic update doesn't work on PBs right now, workaround added above.
             //NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
@@ -138,10 +142,9 @@ namespace Digi.LoopComputers
 
         private void FirstUpdate()
         {
-            var block = (IMyTerminalBlock)Entity;
-            block.CustomNameChanged += NameChanged;
-            ReadLegacyName(block);
-            NameChanged(block);
+            pb.CustomNameChanged += NameChanged;
+            ReadLegacyName(pb);
+            NameChanged(pb);
 
             if(!LoopComputersMod.instance.initTerminalUI)
             {
@@ -198,10 +201,8 @@ namespace Digi.LoopComputers
         {
             try
             {
-                LoopComputersMod.instance?.PBs.Remove(Entity.EntityId);
-
-                var block = (IMyTerminalBlock)Entity;
-                block.CustomNameChanged -= NameChanged;
+                LoopComputersMod.instance.PBs.Remove(pb.EntityId);
+                pb.CustomNameChanged -= NameChanged;
             }
             catch(Exception e)
             {
@@ -250,7 +251,6 @@ namespace Digi.LoopComputers
 
         private void SaveToName(string forceName = null)
         {
-            var block = (IMyTerminalBlock)Entity;
             var str = LoopComputersMod.instance.str;
             str.Clear();
             str.Append(forceName ?? GetNameNoData().Trim());
@@ -263,14 +263,13 @@ namespace Digi.LoopComputers
                 str.Append(DATA_TAG_END);
             }
 
-            block.CustomName = str.ToString();
+            pb.CustomName = str.ToString();
             str.Clear();
         }
 
         private string GetNameNoData()
         {
-            var block = Entity as IMyTerminalBlock;
-            var name = block.CustomName;
+            var name = pb.CustomName;
             var startIndex = name.IndexOf(DATA_TAG_START, StringComparison.OrdinalIgnoreCase);
 
             if(startIndex == -1)
@@ -289,8 +288,6 @@ namespace Digi.LoopComputers
         {
             try
             {
-                var pb = (IMyProgrammableBlock)Entity;
-
                 if(pb.CubeGrid.Physics == null)
                     return;
 
