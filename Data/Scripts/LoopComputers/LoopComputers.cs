@@ -30,6 +30,7 @@ namespace Digi.LoopComputers
         public bool initTerminalUI = false;
         public readonly StringBuilder str = new StringBuilder();
         public readonly Dictionary<long, LoopPB> PBs = new Dictionary<long, LoopPB>();
+        private readonly HashSet<long> removePBs = new HashSet<long>();
 
         private IMyTerminalControl separator = null;
 
@@ -102,9 +103,25 @@ namespace Digi.LoopComputers
                 }
 
                 // HACK update PBs here...
-                foreach(var gamelogic in PBs.Values)
+                foreach(var kv in PBs)
                 {
-                    gamelogic.UpdateBeforeSimulation();
+                    var logic = kv.Value;
+
+                    if(logic.block.Closed)
+                    {
+                        removePBs.Add(kv.Key);
+                        continue;
+                    }
+
+                    logic.UpdateBeforeSimulation();
+                }
+
+                if(removePBs.Count > 0)
+                {
+                    foreach(var key in removePBs)
+                        PBs.Remove(key);
+
+                    removePBs.Clear();
                 }
             }
             catch(Exception e)
@@ -117,7 +134,7 @@ namespace Digi.LoopComputers
     [MyEntityComponentDescriptor(typeof(MyObjectBuilder_MyProgrammableBlock), useEntityUpdate: false)]
     public class LoopPB : MyGameLogicComponent
     {
-        private IMyProgrammableBlock pb;
+        public IMyProgrammableBlock block;
         private bool first = true;
         private float delayTime = 0;
         private int tick = 0;
@@ -131,10 +148,10 @@ namespace Digi.LoopComputers
 
         public override void Init(MyObjectBuilder_EntityBase objectBuilder)
         {
-            pb = (IMyProgrammableBlock)Entity; // HACK needed to stire Entity because it will be null after Init() if this is the only component on this block.
+            block = (IMyProgrammableBlock)Entity; // HACK needed to stire Entity because it will be null after Init() if this is the only component on this block.
 
             // using InvokeOnGameThread() since Init() can be async
-            MyAPIGateway.Utilities.InvokeOnGameThread(() => LoopComputersMod.instance.PBs.Add(pb.EntityId, this));
+            MyAPIGateway.Utilities.InvokeOnGameThread(() => LoopComputersMod.instance.PBs[block.EntityId] = this);
 
             // HACK disabled since gamelogic update doesn't work on PBs right now, workaround added above.
             //NeedsUpdate = MyEntityUpdateEnum.EACH_FRAME;
@@ -142,9 +159,9 @@ namespace Digi.LoopComputers
 
         private void FirstUpdate()
         {
-            pb.CustomNameChanged += NameChanged;
-            ReadLegacyName(pb);
-            NameChanged(pb);
+            block.CustomNameChanged += NameChanged;
+            ReadLegacyName(block);
+            NameChanged(block);
 
             if(!LoopComputersMod.instance.initTerminalUI)
             {
@@ -201,8 +218,7 @@ namespace Digi.LoopComputers
         {
             try
             {
-                LoopComputersMod.instance.PBs.Remove(pb.EntityId);
-                pb.CustomNameChanged -= NameChanged;
+                block.CustomNameChanged -= NameChanged;
             }
             catch(Exception e)
             {
@@ -263,13 +279,13 @@ namespace Digi.LoopComputers
                 str.Append(DATA_TAG_END);
             }
 
-            pb.CustomName = str.ToString();
+            block.CustomName = str.ToString();
             str.Clear();
         }
 
         private string GetNameNoData()
         {
-            var name = pb.CustomName;
+            var name = block.CustomName;
             var startIndex = name.IndexOf(DATA_TAG_START, StringComparison.OrdinalIgnoreCase);
 
             if(startIndex == -1)
@@ -288,7 +304,7 @@ namespace Digi.LoopComputers
         {
             try
             {
-                if(pb.CubeGrid.Physics == null)
+                if(block.CubeGrid.Physics == null)
                     return;
 
                 if(first)
@@ -310,10 +326,10 @@ namespace Digi.LoopComputers
                 if(delayTime < 0.016f)
                     return;
 
-                if(pb.Enabled && pb.IsFunctional && pb.IsWorking && ++tick >= (delayTime * 60))
+                if(block.Enabled && block.IsFunctional && block.IsWorking && ++tick >= (delayTime * 60))
                 {
                     tick = 0;
-                    pb.Run();
+                    block.Run();
                 }
             }
             catch(Exception e)
